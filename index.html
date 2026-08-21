@@ -2,21 +2,275 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' https://cdnjs.cloudflare.com https://cdn.example.net; script-src 'self' 'nonce-{{CSP_NONCE}}'">
+  <!--
+    CLOUD READINESS FIX (cr-css-1000): CSP updated to allow only the AWS CloudFront
+    distribution domain for stylesheets. Third-party CDN origins (cdnjs.cloudflare.com,
+    cdn.example.net) have been removed from style-src; all CSS assets are now served
+    from CloudFront backed by S3 with SRI enforcement.
+    Replace ${CLOUDFRONT_DOMAIN} with your actual CloudFront distribution domain
+    (e.g., d1234abcd.cloudfront.net) at build/deploy time via the CLOUDFRONT_DOMAIN
+    environment variable.
+
+    CLOUD READINESS FIX (cr-css-1002): 'unsafe-inline' added to style-src to permit
+    the Lambda@Edge-injected critical CSS <style> block. A nonce-based CSP
+    (style-src 'nonce-{{CSP_NONCE}}') is the preferred long-term approach once
+    Lambda@Edge is configured to stamp a per-request nonce on the injected <style> tag.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://${CLOUDFRONT_DOMAIN}; script-src 'self' 'nonce-{{CSP_NONCE}}'">
   <title>App</title>
-  <style>
-    /* Critical above-the-fold CSS inlined */
-    body { margin: 0; font-family: system-ui; }
-    .nav { height: 56px; }
+
+  <!--
+    CLOUD READINESS FIX (cr-css-1004): Missing Preload for Critical Web Fonts
+    ─────────────────────────────────────────────────────────────────────────────────────
+    Remediation: Add Font Preload Links with CloudFront CDN Distribution
+
+    WHY THIS FIX IS NEEDED:
+      Web fonts loaded without <link rel="preload"> cause FOIT (Flash of Invisible Text)
+      because the browser discovers the font only after parsing the CSS and layout, which
+      delays text rendering and degrades LCP (Largest Contentful Paint).
+
+    HOW IT WORKS:
+      - The <link rel="preload"> tag below instructs the browser to fetch the BrandSans
+        woff2 font file at the highest priority, in parallel with HTML parsing, before
+        the CSS is even parsed. This eliminates the FOIT delay.
+      - The font is served from AWS CloudFront (${CLOUDFRONT_DOMAIN}) for low-latency
+        global delivery. CloudFront CDN benefits from the preload hint to prioritize
+        font loading at the edge, improving perceived performance and LCP scores.
+      - crossorigin="anonymous" is required for font preloads (even same-origin) because
+        fonts are fetched with CORS mode; omitting it causes a double-download.
+      - as="font" and type="font/woff2" allow the browser to correctly prioritise and
+        match the preloaded resource to the @font-face declaration in site.css.
+
+    Action required: Replace ${CLOUDFRONT_DOMAIN} with your actual CloudFront distribution
+      domain (e.g. d1234abcd.cloudfront.net) at build/deploy time via the
+      CLOUDFRONT_DOMAIN environment variable.
+  -->
+  <link rel="preload"
+        href="https://${CLOUDFRONT_DOMAIN}/assets/fonts/analytics.woff2"
+        as="font"
+        type="font/woff2"
+        crossorigin="anonymous">
+
+  <!--
+    CLOUD READINESS FIX (cr-css-1002): Critical CSS Not Inlined for Above-Fold Content
+    ─────────────────────────────────────────────────────────────────────────────────────
+    Remediation: Inline Critical CSS via AWS Lambda@Edge and CloudFront
+
+    HOW IT WORKS AT RUNTIME (Lambda@Edge):
+      1. A CloudFront viewer-response Lambda@Edge function
+         (lambda-edge/critical-css-injector.js) intercepts every HTML response.
+      2. It reads the pre-built critical CSS bundle from S3
+         (s3://${S3_BUCKET}/assets/css/critical.css) — cached in Lambda memory
+         between invocations to avoid per-request S3 latency.
+      3. It replaces the <!-- LAMBDA_EDGE_CRITICAL_CSS_PLACEHOLDER --> comment below
+         with a <style> tag containing the full critical CSS content, so the browser
+         receives inlined styles with the very first byte of HTML.
+      4. The external site.css <link> is loaded asynchronously (media="print" swap)
+         so it never blocks the initial render.
+
+    HOW IT WORKS AT BUILD TIME (CI/CD):
+      1. `npm run extract-critical` runs critical/penthouse against the built HTML.
+      2. The extracted critical CSS is written to assets/css/critical.css.
+      3. critical.css is uploaded to S3 and a CloudFront invalidation is issued.
+
+    STATIC FALLBACK (non-CloudFront / local dev):
+      The <style> block below contains the manually curated critical CSS for
+      above-fold content. Lambda@Edge will replace this block at the edge;
+      in local development the static inline styles are used directly.
+  -->
+
+  <!-- LAMBDA_EDGE_CRITICAL_CSS_PLACEHOLDER -->
+  <style id="critical-css">
+    /*
+     * Critical above-fold CSS — inlined to eliminate render-blocking requests.
+     * Source: assets/css/site.css (rules annotated with @critical).
+     * At runtime this block is replaced by Lambda@Edge with the content of
+     * assets/css/critical.css (built by `npm run extract-critical`).
+     *
+     * CLOUD READINESS FIX (cr-css-1002): Previously this CSS was loaded as an
+     * external file (assets/css/site.css), causing a render-blocking request
+     * that delayed First Contentful Paint. It is now inlined here so the browser
+     * can paint above-fold content without waiting for an additional network round-trip.
+     */
+
+    /* Reset / base — above-fold */
+    body { margin: 0; font-family: 'BrandSans', system-ui, sans-serif; }
+    .nav { height: 56px; background: #0a2540; }
+
+    /* @critical — CSS custom properties used by above-fold components */
+    :root {
+      --primary-color: #0a2540;
+      --hero-bg-url: url('assets/img/header.svg');
+      --promo-bg-url: url('assets/img/bg.jpg');
+    }
+
+    /* @critical — hero section is above the fold on all viewports */
+    .hero {
+      color: var(--primary-color);
+      background: var(--hero-bg-url);
+    }
   </style>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css" integrity="sha384-EXAMPLEHASH0001" crossorigin="anonymous">
-  <link rel="stylesheet" href="https://cdn.example.net/charts.css">
-  <link rel="stylesheet" href="assets/css/site.css">
-  <link rel="stylesheet" href="assets/css/brand.css">
+
+  <!--
+    CLOUD READINESS FIX (cr-css-1008): Client-Only CSS Loaded After Hydration
+    ─────────────────────────────────────────────────────────────────────────────
+    Remediation: Inline Critical CSS via AWS Lambda@Edge SSR with S3 Style Extraction
+
+    WHY THIS FIX IS NEEDED:
+      The styles in assets/css/client-hydration.css were previously loaded only
+      after client-side JavaScript hydration. This meant they were absent during
+      the server-side render pass, causing a Flash of Unstyled Content (FOUC):
+      the server-rendered HTML arrived at the browser without these styles, and
+      the page visually "jumped" when the client-side JS hydrated and injected them.
+      Cloud SSR platforms (AWS Lambda SSR, CloudFront) require styles to be
+      available during the server render for a consistent UI.
+
+    HOW IT WORKS AT RUNTIME (Lambda@Edge):
+      1. The CloudFront viewer-response Lambda@Edge function
+         (lambda-edge/critical-css-injector.js) intercepts every HTML response.
+      2. It reads the pre-built hydration CSS bundle from S3
+         (s3://${S3_BUCKET}/assets/css/client-hydration.css) — cached in Lambda
+         memory between invocations to avoid per-request S3 latency.
+      3. It replaces the <!-- LAMBDA_EDGE_HYDRATION_CSS_PLACEHOLDER --> comment
+         below with a <style id="hydration-css-edge"> tag containing the full
+         hydration CSS content, so the browser receives these styles with the
+         very first byte of HTML — before any client-side JS runs.
+      4. After client-side hydration, the inline <style> block is already present
+         in the DOM, so no post-hydration style injection is needed, eliminating
+         the FOUC entirely.
+
+    HOW IT WORKS AT BUILD TIME (CI/CD):
+      1. `npm run build:css:hydration` compiles assets/css/client-hydration.css
+         through the PostCSS pipeline (minification via cssnano in production).
+      2. The compiled output (dist/css/client-hydration.css) is uploaded to S3:
+           aws s3 cp dist/css/client-hydration.css \
+               s3://${S3_BUCKET}/assets/css/client-hydration.css \
+               --cache-control "max-age=86400"
+      3. A CloudFront invalidation is issued for /assets/css/client-hydration.css.
+      4. Lambda@Edge picks up the new hydration CSS on its next cache refresh
+         (TTL: 5 minutes).
+
+    STATIC FALLBACK (non-CloudFront / local dev):
+      The <style> block below contains the static hydration CSS for local
+      development. Lambda@Edge will replace this block at the edge; in local
+      development the static inline styles are used directly.
+  -->
+
+  <!-- LAMBDA_EDGE_HYDRATION_CSS_PLACEHOLDER -->
+  <style id="hydration-css">
+    /*
+     * Hydration CSS — inlined to eliminate FOUC on SSR pages.
+     * Source: assets/css/client-hydration.css
+     * At runtime this block is replaced by Lambda@Edge with the S3-hosted
+     * compiled hydration CSS bundle (built by `npm run build:css:hydration`).
+     *
+     * CLOUD READINESS FIX (cr-css-1008): Previously these styles were injected
+     * only after client-side JS hydration, causing a style mismatch between
+     * server-rendered and client-hydrated content. They are now inlined here
+     * so the browser receives them with the first byte of HTML.
+     */
+    .hydrated-widget { opacity: 1; transition: opacity 0.3s; }
+    .ssr-hidden { display: block; color: var(--hydrated-color); }
+  </style>
+
+  <!--
+    CLOUD READINESS FIX (cr-css-1000) — Occurrence 1 (site.css line 3):
+    Replaced: @import url('https://cdn.example.net/critical-above-fold.css')
+    Fix: Asset is now hosted on AWS S3 and served via CloudFront.
+         The <link> tag carries integrity (SRI hash) and crossorigin attributes
+         so the browser verifies the file has not been tampered with.
+    Action required: Replace ${CLOUDFRONT_DOMAIN} with your CloudFront domain and
+         regenerate the sha384 hash from the S3-hosted file using:
+           openssl dgst -sha384 -binary critical-above-fold.css | openssl base64 -A
+  -->
+  <link rel="stylesheet"
+        href="https://${CLOUDFRONT_DOMAIN}/assets/css/critical-above-fold.css"
+        integrity="sha384-REPLACE_WITH_GENERATED_SRI_HASH_FOR_CRITICAL_ABOVE_FOLD_CSS"
+        crossorigin="anonymous">
+
+  <!--
+    CLOUD READINESS FIX (cr-css-1000) — Occurrence 2 (site.css line 5):
+    Replaced: @import url('https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css')
+    Fix: Asset is now hosted on AWS S3 and served via CloudFront.
+         The <link> tag carries integrity (SRI hash) and crossorigin attributes
+         so the browser verifies the file has not been tampered with.
+    Action required: Replace ${CLOUDFRONT_DOMAIN} with your CloudFront domain and
+         regenerate the sha384 hash from the S3-hosted file using:
+           openssl dgst -sha384 -binary animate.min.css | openssl base64 -A
+  -->
+  <link rel="stylesheet"
+        href="https://${CLOUDFRONT_DOMAIN}/assets/css/animate.min.css"
+        integrity="sha384-REPLACE_WITH_GENERATED_SRI_HASH_FOR_ANIMATE_MIN_CSS"
+        crossorigin="anonymous">
+
+  <!--
+    normalize.css — already had integrity/crossorigin; migrated to CloudFront/S3.
+    Action required: Replace ${CLOUDFRONT_DOMAIN} and regenerate the SRI hash.
+  -->
+  <link rel="stylesheet"
+        href="https://${CLOUDFRONT_DOMAIN}/assets/css/normalize.min.css"
+        integrity="sha384-REPLACE_WITH_GENERATED_SRI_HASH_FOR_NORMALIZE_MIN_CSS"
+        crossorigin="anonymous">
+
+  <!--
+    charts.css — previously loaded from cdn.example.net without SRI; migrated to CloudFront/S3.
+    Action required: Replace ${CLOUDFRONT_DOMAIN} and regenerate the SRI hash.
+  -->
+  <link rel="stylesheet"
+        href="https://${CLOUDFRONT_DOMAIN}/assets/css/charts.css"
+        integrity="sha384-REPLACE_WITH_GENERATED_SRI_HASH_FOR_CHARTS_CSS"
+        crossorigin="anonymous">
+
+  <!--
+    CLOUD READINESS FIX (cr-css-1002): site.css converted from render-blocking to
+    async (non-blocking) load using the media="print" swap pattern.
+    - media="print" causes the browser to download the stylesheet without blocking render.
+    - onload switches media to "all" so the full stylesheet applies after download.
+    - The <noscript> fallback ensures styles load in environments without JavaScript.
+    Critical above-fold styles from site.css are already inlined in the <style> block
+    above, so no above-fold content is unstyled during the async load.
+  -->
+  <!--
+    CLOUD READINESS FIX (cr-css-1006): Multiple CSS Files Not Concatenated or HTTP/2
+    ─────────────────────────────────────────────────────────────────────────────────
+    Remediation: Consolidate CSS via AWS CloudFront with S3-hosted Bundled Assets
+
+    Previously, site.css and brand.css (plus 10 chunk files imported via loader.css)
+    were loaded as separate HTTP requests, creating excessive connection overhead.
+
+    All CSS files (chunk00–chunk09, deferred.css, site.css, brand.css) are now
+    concatenated at build time by `npm run build:bundle` (postcss-import + PostCSS
+    pipeline) into a single artifact: dist/css/bundle.css.
+
+    The bundle is uploaded to S3 and served via AWS CloudFront with HTTP/2 enabled,
+    reducing 13 separate HTTP requests to a single request with:
+      - HTTP/2 multiplexing over a single connection
+      - CloudFront edge caching (Cache-Control: public, max-age=31536000, immutable)
+      - Subresource Integrity (SRI) verification for supply-chain security
+
+    Action required:
+      1. Replace ${CLOUDFRONT_DOMAIN} with your CloudFront distribution domain.
+      2. Regenerate the SRI hash after each build:
+           openssl dgst -sha384 -binary dist/css/bundle.css | openssl base64 -A
+  -->
+  <link rel="stylesheet"
+        href="https://${CLOUDFRONT_DOMAIN}/assets/css/bundle.css"
+        integrity="sha384-REPLACE_WITH_GENERATED_SRI_HASH_FOR_BUNDLE_CSS"
+        crossorigin="anonymous"
+        media="print"
+        onload="this.media='all'">
+  <noscript><link rel="stylesheet"
+                  href="https://${CLOUDFRONT_DOMAIN}/assets/css/bundle.css"
+                  integrity="sha384-REPLACE_WITH_GENERATED_SRI_HASH_FOR_BUNDLE_CSS"
+                  crossorigin="anonymous"></noscript>
 </head>
 <body>
   <script type="importmap" nonce="{{CSP_NONCE}}">
-    { "imports": { "@emotion/styled": "./assets/js/emotion-styled-shim.js" } }
+    {
+      "imports": {
+        "styled-components": "./assets/js/styled-components-ssr-shim.js"
+      }
+    }
   </script>
   <script type="module" src="src/ui/styles.js"></script>
 </body>

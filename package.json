@@ -1,5 +1,28 @@
 {
   "name": "analytics-portal",
   "type": "module",
-  "dependencies": { "@emotion/styled": "^11.11.0" }
+  "scripts": {
+    "extract-critical": "node scripts/extract-critical.js",
+    "build:css": "postcss assets/css/site.css -o dist/css/site.css",
+    "build:css:hydration": "postcss assets/css/client-hydration.css -o dist/css/client-hydration.css",
+    "build:bundle": "postcss assets/css/loader.css -o dist/css/bundle.css",
+    "upload:css:hydration": "aws s3 cp dist/css/client-hydration.css s3://$S3_BUCKET/assets/css/client-hydration.css --cache-control \"max-age=86400\" && aws cloudfront create-invalidation --distribution-id $CF_DIST_ID --paths \"/assets/css/client-hydration.css\"",
+    "build": "npm run build:bundle && npm run build:css && npm run build:css:hydration && npm run extract-critical"
+  },
+  "dependencies": {
+    "styled-components": "^6.1.0",
+    "@aws-sdk/client-s3": "^3.600.0"
+  },
+  "devDependencies": {
+    "critical": "^5.0.0",
+    "postcss": "^8.4.38",
+    "postcss-cli": "^11.0.0",
+    "postcss-import": "^16.1.0",
+    "postcss-replace": "^2.0.1",
+    "autoprefixer": "^10.4.19",
+    "cssnano": "^7.0.0",
+    "dotenv": "^16.4.5",
+    "@fullhuman/postcss-purgecss": "^6.0.0",
+    "postcss-custom-properties": "^13.3.0"
+  }
 }
