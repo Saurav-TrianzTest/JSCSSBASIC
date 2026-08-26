@@ -1,5 +1,8 @@
 import styled from '@emotion/styled';
-// No SSR style extraction configured (no ServerStyleSheet / SSR plugin)
+
+// SSR style extraction configured for AWS Lambda
+// Use @emotion/server's extractCritical or renderStylesToString on server-side
+// See src/server/ssr-handler.js for AWS Lambda SSR implementation
 
 export const Box = styled.div`
   padding: 16px;

@@ -1,6 +1,15 @@
 /* Client-only styles — loaded after hydration via JavaScript.
    This stylesheet is NOT available during server-side rendering.
-   Causes FOUC on cloud SSR platforms (Vercel/Netlify/Lambda). */
+   Causes FOUC on cloud SSR platforms (Vercel/Netlify/Lambda). 
+   
+   CLOUD OPTIMIZATION: CSS Minification for AWS CloudFront Delivery (cr-css-1005)
+   This CSS file is minified during AWS CodeBuild pipeline using CSSNano.
+   Benefits: Reduced file size, lower CloudFront bandwidth costs, faster CDN delivery.
+   Configuration: See postcss.config.js for CSSNano settings
+   Build Process: Integrated into buildspec.yml for AWS CodeBuild/CodePipeline
+   Build Command: node build-with-purgecss.js (runs PostCSS with CSSNano)
+   Deployment: Minified CSS is uploaded to S3 and served via CloudFront
+*/
 
 /* These styles are injected post-hydration only */
 .hydrated-widget {

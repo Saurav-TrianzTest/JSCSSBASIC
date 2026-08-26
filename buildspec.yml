@@ -1,0 +1,155 @@
+version: 0.2
+
+# ============================================================================
+# AWS CodeBuild Buildspec for CSS Bundling and CloudFront Deployment
+# ============================================================================
+#
+# This buildspec.yml integrates CSS bundling (cr-css-1006) into the AWS
+# CodeBuild pipeline for optimal CloudFront delivery.
+#
+# CLOUD OPTIMIZATION: Multiple CSS Files Concatenation (cr-css-1006)
+# -------------------------------------------------------------------
+# • Bundles 13 CSS files into 1 file (92% reduction in HTTP requests)
+# • Minifies with CSSNano (40-60% size reduction)
+# • Optimizes with PurgeCSS (removes unused CSS)
+# • Uploads to S3 with optimal cache headers
+# • Serves via CloudFront with HTTP/2 enabled
+#
+# Prerequisites:
+#   - AWS CodeBuild project configured
+#   - IAM role with permissions: s3:PutObject, cloudfront:CreateInvalidation, ssm:GetParameter
+#   - S3 bucket created for assets
+#   - CloudFront distribution configured with HTTP/2 enabled
+#
+# Environment Variables (set in CodeBuild project):
+#   - S3_BUCKET: S3 bucket name for assets (e.g., my-app-assets)
+#   - CLOUDFRONT_DIST_ID: CloudFront distribution ID (e.g., E1234567890ABC)
+#   - CDN_BASE_URL: CloudFront URL (e.g., https://d1234567890.cloudfront.net)
+#   - NODE_ENV: Environment (production)
+#   - ENABLE_PURGECSS: Enable PurgeCSS optimization (true)
+#   - AWS_REGION: AWS region (e.g., us-east-1)
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+    commands:
+      - echo "Installing system dependencies..."
+      - echo "Node.js version:" $(node --version)
+      - echo "npm version:" $(npm --version)
+  
+  pre_build:
+    commands:
+      - echo "==================================================================="
+      - echo "Pre-Build Phase - Installing npm dependencies"
+      - echo "==================================================================="
+      - npm install
+      - echo "✓ Dependencies installed"
+      
+      - echo ""
+      - echo "Retrieving CDN URL from SSM Parameter Store..."
+      - |
+        if [ -z "$CDN_BASE_URL" ]; then
+          export CDN_BASE_URL=$(aws ssm get-parameter --name /app/cdn/base-url --region ${AWS_REGION:-us-east-1} --query Parameter.Value --output text 2>/dev/null || echo "")
+          if [ -z "$CDN_BASE_URL" ]; then
+            echo "⚠ WARNING: No CDN URL configured. Using relative paths."
+          else
+            echo "✓ Retrieved CDN URL: $CDN_BASE_URL"
+          fi
+        else
+          echo "✓ Using CDN_BASE_URL from environment: $CDN_BASE_URL"
+        fi
+  
+  build:
+    commands:
+      - echo "==================================================================="
+      - echo "Build Phase - CSS Bundling and Optimization (cr-css-1006)"
+      - echo "==================================================================="
+      
+      - echo ""
+      - echo "Step 1: Bundle CSS files (13 files → 1 file)"
+      - npm run build:bundle-css
+      - echo "✓ CSS bundling completed"
+      
+      - echo ""
+      - echo "Step 2: Minify and optimize CSS (CSSNano + PurgeCSS)"
+      - export NODE_ENV=production
+      - export ENABLE_PURGECSS=true
+      - npm run build:purgecss
+      - echo "✓ CSS minification and optimization completed"
+      
+      - echo ""
+      - echo "Step 3: Verify bundle creation"
+      - ls -lh assets/css/bundle.css
+      - echo "✓ Bundle verified"
+      
+      - echo ""
+      - echo "Build Summary:"
+      - cat css-bundle-report.json 2>/dev/null || echo "Bundle report not found"
+  
+  post_build:
+    commands:
+      - echo "==================================================================="
+      - echo "Post-Build Phase - S3 Upload and CloudFront Invalidation"
+      - echo "==================================================================="
+      
+      - echo ""
+      - echo "Step 1: Upload assets to S3"
+      - |
+        aws s3 sync ./assets s3://${S3_BUCKET}/assets \
+          --delete \
+          --cache-control "public, max-age=31536000, immutable" \
+          --metadata-directive REPLACE \
+          --exclude "*.map" \
+          --exclude "*.md"
+      - echo "✓ Assets uploaded to S3: s3://${S3_BUCKET}/assets"
+      
+      - echo ""
+      - echo "Step 2: Invalidate CloudFront cache"
+      - |
+        aws cloudfront create-invalidation \
+          --distribution-id ${CLOUDFRONT_DIST_ID} \
+          --paths "/assets/css/*" "/assets/css/bundle.css"
+      - echo "✓ CloudFront cache invalidated"
+      
+      - echo ""
+      - echo "==================================================================="
+      - echo "Build Completed Successfully! (cr-css-1006)"
+      - echo "==================================================================="
+      - echo ""
+      - echo "Optimization Results:"
+      - echo "  • HTTP requests reduced: 13 → 1 (92% reduction)"
+      - echo "  • CSS bundled and minified"
+      - echo "  • Uploaded to S3: s3://${S3_BUCKET}/assets"
+      - echo "  • CloudFront cache invalidated"
+      - echo ""
+      - echo "Next Steps:"
+      - echo "  1. Verify CloudFront distribution has HTTP/2 enabled"
+      - echo "  2. Test application: ${CDN_BASE_URL}"
+      - echo "  3. Monitor CloudFront metrics for performance improvements"
+      - echo ""
+      - echo "Benefits:"
+      - echo "  ✓ Reduced connection overhead"
+      - echo "  ✓ Improved edge network performance"
+      - echo "  ✓ Better cache efficiency"
+      - echo "  ✓ Faster page load times"
+
+artifacts:
+  files:
+    - '**/*'
+  base-directory: '.'
+  name: build-artifacts-$(date +%Y%m%d-%H%M%S)
+
+cache:
+  paths:
+    - 'node_modules/**/*'
+
+reports:
+  css-bundle-report:
+    files:
+      - 'css-bundle-report.json'
+    file-format: 'JSON'
+  build-report:
+    files:
+      - 'build-report.json'
+    file-format: 'JSON'

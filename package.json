@@ -1,5 +1,33 @@
 {
   "name": "analytics-portal",
+  "version": "1.0.0",
   "type": "module",
-  "dependencies": { "@emotion/styled": "^11.11.0" }
+  "dependencies": {
+    "@emotion/styled": "^11.11.0",
+    "@emotion/react": "^11.11.0",
+    "@emotion/server": "^11.11.0",
+    "@emotion/cache": "^11.11.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "aws-sdk": "^2.1400.0"
+  },
+  "devDependencies": {
+    "postcss": "^8.4.31",
+    "@fullhuman/postcss-purgecss": "^5.0.0",
+    "postcss-url": "^10.1.3",
+    "autoprefixer": "^10.4.16",
+    "cssnano": "^6.0.1",
+    "@types/aws-lambda": "^8.10.119"
+  },
+  "scripts": {
+    "build:bundle-css": "node build-css-bundle.js",
+    "build:cdn": "node build-with-cdn.js",
+    "build:purgecss": "node build-with-purgecss.js",
+    "build:ssr": "node build-ssr.js",
+    "build:minify": "NODE_ENV=production node build-with-purgecss.js",
+    "build:production": "node build-css-bundle.js && NODE_ENV=production ENABLE_PURGECSS=true node build-with-purgecss.js",
+    "build:aws": "node build-css-bundle.js && NODE_ENV=production ENABLE_PURGECSS=true node build-with-purgecss.js",
+    "build:all": "node build-css-bundle.js && node build-with-purgecss.js"
+  },
+  "description": "Analytics portal with AWS CloudFront optimization (CSS minification, PurgeCSS, CDN integration)"
 }

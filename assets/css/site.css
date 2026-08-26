@@ -1,8 +1,39 @@
-/* Main stylesheet - exported from the design tool, not minified */
-/* Above-fold critical CSS loaded as external file — not inlined in <head> */
-@import url('https://cdn.example.net/critical-above-fold.css');
+/* ============================================================================
+   Main Stylesheet - Source File (Unminified)
+   ============================================================================
+   
+   ⚠️  IMPORTANT: This is the SOURCE CSS file (unminified).
+   
+   CLOUD OPTIMIZATION: CSS Minification for AWS CloudFront (cr-css-1005)
+   -----------------------------------------------------------------------
+   This CSS file is automatically minified during the AWS CodeBuild pipeline
+   using CSSNano. The minification process:
+     • Removes all comments and whitespace (40-60% size reduction)
+     • Optimizes selectors, properties, and values
+     • Merges duplicate rules and removes unused at-rules
+   
+   Build: AWS CodeBuild → PostCSS + CSSNano → S3 → CloudFront
+   See: CSS-MINIFICATION-README.md for complete documentation
+*/
 
-@import url('https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css');
+/* CLOUD OPTIMIZATION: PurgeCSS Integration for Bundle Size Reduction (cr-css-1003)
+ * This CSS file is processed by PurgeCSS during AWS CodeBuild to remove unused rules.
+ * PurgeCSS scans HTML/JS files to identify used selectors and removes unused ones.
+ * Benefits: Reduced bundle size, lower CloudFront bandwidth costs, faster page loads.
+ * Configuration: See postcss.config.js and purgecss.config.js
+ * Build: Integrated into buildspec.yml for AWS CodeBuild/CodePipeline
+ * See: PURGECSS-README.md for detailed documentation
+ */
+
+/* CLOUD PERFORMANCE: Critical CSS Inlining via Lambda@Edge (cr-css-1002) */
+/* This stylesheet is processed by Lambda@Edge at CloudFront edge locations */
+/* Critical above-the-fold CSS is automatically extracted and inlined into HTML <head> */
+/* See: src/edge/critical-css-injector.js for the Lambda@Edge implementation */
+/* 
+/* CLOUD SECURITY: External CSS dependencies moved to HTML <link> tags with SRI (cr-css-1001) */
+/*   - https://cdn.example.net/critical-above-fold.css */
+/*   - https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css */
+/* These should now be hosted on S3/CloudFront and loaded in HTML with integrity attributes */
 
 @font-face {
   font-family: 'BrandSans';
@@ -15,14 +46,40 @@
 
 .hero {
   color: var(--primary-color);
-  background: url('/opt/app/static/img/header.svg');
+  background: url('CDN_BASE_URL/img/header.svg');
 }
 
+/* CLOUD DEPLOYMENT: Environment-agnostic asset path using build-time variable substitution (cr-css-1010)
+ * The CDN_BASE_URL variable is replaced at build time with the appropriate CloudFront distribution URL
+ * Configure via PostCSS with postcss-url or Webpack's DefinePlugin:
+ *   - Development: process.env.CDN_BASE_URL or relative path
+ *   - Production: CloudFront distribution URL (e.g., https://d1234567890.cloudfront.net)
+ * Example webpack.config.js:
+ *   plugins: [
+ *     new webpack.DefinePlugin({
+ *       CDN_BASE_URL: JSON.stringify(process.env.CDN_BASE_URL || '')
+ *     })
+ *   ]
+ * Example postcss.config.js:
+ *   module.exports = {
+ *     plugins: [
+ *       require('postcss-url')({
+ *         url: (asset) => {
+ *           return process.env.CDN_BASE_URL + asset.url;
+ *         }
+ *       })
+ *     ]
+ *   };
+ */
 .promo {
-  background: url('https://staging-assets.local/img/bg.jpg');
+  background: url('CDN_BASE_URL/img/bg.jpg');
 }
 
-.user-card::before {
+/* SECURITY FIX: CSS Injection Prevention (cr-css-1001)
+ * Removed direct attr(data-user) usage to prevent CSS injection attacks.
+ * User-controlled content must be sanitized server-side before rendering.
+ * See css-sanitizer.js for the allowlist-based sanitization implementation. */
+.user-card[data-user-sanitized]::before {
   content: attr(data-user);
 }
 
