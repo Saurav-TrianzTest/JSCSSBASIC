@@ -1,5 +1,23 @@
 {
   "name": "analytics-portal",
   "type": "module",
-  "dependencies": { "@emotion/styled": "^11.11.0" }
+  "dependencies": {
+    "@emotion/cache": "^11.11.0",
+    "@emotion/server": "^11.11.0",
+    "@emotion/styled": "^11.11.0",
+    "@google-cloud/storage": "^7.7.0"
+  },
+  "devDependencies": {
+    "css-loader": "^7.1.2",
+    "css-minimizer-webpack-plugin": "^6.0.0",
+    "mini-css-extract-plugin": "^2.9.0",
+    "purgecss": "^6.0.0",
+    "webpack": "^5.91.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "scripts": {
+    "build:css": "purgecss --config purgecss.config.cjs",
+    "build:bundle": "NODE_ENV=production webpack --config webpack.config.js",
+    "build:bundle:dev": "NODE_ENV=development webpack --config webpack.config.js"
+  }
 }

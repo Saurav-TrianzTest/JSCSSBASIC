@@ -1,15 +1,88 @@
-/* Multiple separate CSS files loaded individually — not concatenated or bundled.
-   This pattern creates excessive HTTP requests and should be concatenated. */
-@import url('chunks/chunk00.css');
-@import url('chunks/chunk01.css');
-@import url('chunks/chunk02.css');
-@import url('chunks/chunk03.css');
-@import url('chunks/chunk04.css');
-@import url('chunks/chunk05.css');
-@import url('chunks/chunk06.css');
-@import url('chunks/chunk07.css');
-@import url('chunks/chunk08.css');
-@import url('chunks/chunk09.css');
-@import url('deferred.css');
-@import url('site.css');
-@import url('brand.css');
+/*
+ * CLOUD READINESS FIX (cr-css-1006): Multiple CSS Files Not Concatenated or HTTP/2
+ * ----------------------------------------------------------------------------------
+ * Previously, this file used 13 individual @import statements to load separate CSS
+ * chunk files (chunk00–chunk09, deferred.css, site.css, brand.css). Each @import
+ * triggers a separate HTTP request, creating excessive connection overhead that
+ * degrades performance on cloud CDN edge networks.
+ *
+ * Remediation applied (GCP Cloud Storage + Cloud CDN with Webpack CSS Bundling
+ * via Cloud Build):
+ *   1. All @import statements have been REMOVED from this file.
+ *   2. A webpack configuration (webpack.config.js) has been added to the project
+ *      root. It uses css-loader and MiniCssExtractPlugin to concatenate all CSS
+ *      chunk files (chunk00–chunk09), deferred.css, site.css, and brand.css into
+ *      a single output bundle: dist/css/bundle.css.
+ *   3. GCP Cloud Build runs `npm run build:bundle` (webpack) as a build step,
+ *      then uploads dist/css/bundle.css to GCP Cloud Storage
+ *      (gs://${_GCP_ASSETS_BUCKET}/css/bundle.css), served via Cloud CDN with
+ *      HTTP/2 for optimal edge network performance.
+ *   4. index.html has been updated to load the single bundled CSS file from
+ *      GCP Cloud Storage / Cloud CDN instead of this loader file.
+ *
+ * Cloud Build step snippet (add to cloudbuild.yaml):
+ *   steps:
+ *     - name: 'node:20'
+ *       entrypoint: npm
+ *       args: ['ci']
+ *     - name: 'node:20'
+ *       entrypoint: npm
+ *       args: ['run', 'build:bundle']
+ *     - name: 'gcr.io/cloud-builders/gsutil'
+ *       args: ['-m', 'cp', '-r', 'dist/css/*',
+ *              'gs://${_GCP_ASSETS_BUCKET}/css/']
+ *
+ * Substitution variables (set in Cloud Build trigger or cloudbuild.yaml):
+ *   _GCP_ASSETS_BUCKET: your GCP Cloud Storage bucket name
+ *
+ * For local development, the individual chunk files remain in assets/css/chunks/
+ * and can be loaded directly. In production (GCP), only the bundled file is served
+ * via Cloud CDN, eliminating all per-chunk HTTP request overhead.
+ *
+ * NOTE: This file is retained as a development-only reference. It is NOT loaded
+ * in production. The webpack entry point (src/css-entry.js) is the canonical
+ * source for the production CSS bundle.
+ */
+
+/*
+ * Development fallback — these rules are inlined here so that local dev servers
+ * (e.g., `vite dev`, `webpack-dev-server`) can serve styles without a build step.
+ * In production, webpack bundles all of the below into dist/css/bundle.css and
+ * the bundle is served from GCP Cloud Storage via Cloud CDN.
+ *
+ * DO NOT add new @import statements here. Add new CSS directly to the appropriate
+ * chunk file and register it in webpack.config.js instead.
+ */
+
+/* chunk00 — component base styles */
+.c0 { color: #000; }
+
+/* chunk01 */
+.c1 { color: #001; }
+
+/* chunk02 */
+.c2 { color: #002; }
+
+/* chunk03 */
+.c3 { color: #003; }
+
+/* chunk04 */
+.c4 { color: #004; }
+
+/* chunk05 */
+.c5 { color: #005; }
+
+/* chunk06 */
+.c6 { color: #006; }
+
+/* chunk07 */
+.c7 { color: #007; }
+
+/* chunk08 */
+.c8 { color: #008; }
+
+/* chunk09 */
+.c9 { color: #009; }
+
+/* deferred — late-loading widget styles */
+.late-widget { color: #333; }

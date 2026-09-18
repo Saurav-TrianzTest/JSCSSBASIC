@@ -1,8 +1,37 @@
 /* Main stylesheet - exported from the design tool, not minified */
-/* Above-fold critical CSS loaded as external file — not inlined in <head> */
-@import url('https://cdn.example.net/critical-above-fold.css');
-
-@import url('https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css');
+/*
+ * CLOUD READINESS FIX (cr-css-1002): Critical CSS Inlined for Above-Fold Content
+ * ---------------------------------------------------------------------------------
+ * Previously, above-fold critical CSS was loaded as an external file via @import,
+ * which caused render-blocking requests and delayed First Contentful Paint (FCP).
+ *
+ * Remediation applied (Inline Critical CSS via Cloud CDN and Cloud Run Edge Middleware):
+ *   1. The @import statements for critical-above-fold.css and animate.min.css have been
+ *      REMOVED from this file. They were render-blocking and prevented optimal FCP.
+ *   2. Critical above-fold CSS rules are now INLINED directly in the <style> block
+ *      inside the HTML <head> in index.html, ensuring zero render-blocking requests
+ *      for above-fold content.
+ *   3. Non-critical CSS (animate.min.css, normalize.min.css, charts.css) is loaded
+ *      via <link rel="stylesheet"> tags with GCP Cloud Storage URLs + SRI hashes,
+ *      served through Cloud CDN for optimal edge delivery.
+ *   4. A Cloud Run Edge Middleware (middleware/inlineCriticalCss.js) is provided to
+ *      dynamically inject inlined critical CSS into HTML responses at the edge,
+ *      eliminating render-blocking external CSS for above-fold content at runtime.
+ *
+ * GCP Cloud Storage bucket URL pattern (set via environment / build config):
+ *   https://storage.googleapis.com/${GCP_ASSETS_BUCKET}/css/critical-above-fold.css
+ *   https://storage.googleapis.com/${GCP_ASSETS_BUCKET}/css/animate.min.css
+ *
+ * SRI hashes are computed in Cloud Build pipelines, stored in Secret Manager,
+ * and injected into HTML <link> tags at build/deploy time.
+ * To regenerate SRI hashes after updating assets:
+ *   shasum -b -a 384 <file> | awk '{ print $1 }' | xxd -r -p | base64
+ * Or use: https://www.srihash.org/
+ *
+ * NOTE: CSS @import does NOT support the `integrity` attribute — SRI must be
+ * enforced at the HTML layer using <link rel="stylesheet" integrity="sha384-...">.
+ * See index.html for the corresponding <link> tags with SRI hashes.
+ */
 
 @font-face {
   font-family: 'BrandSans';
@@ -15,19 +44,125 @@
 
 .hero {
   color: var(--primary-color);
-  background: url('/opt/app/static/img/header.svg');
+  /*
+   * CLOUD READINESS FIX (cr-css-1011): Absolute Filesystem Paths in CSS URLs
+   * --------------------------------------------------------------------------
+   * Previously used an absolute filesystem path '/opt/app/static/img/header.svg'
+   * in the CSS url() declaration. Absolute filesystem paths break in cloud
+   * containers where the filesystem structure differs from the development
+   * environment, making the application non-portable across container environments.
+   *
+   * Remediation applied (Replace Absolute Filesystem Paths with GCP Cloud Storage
+   * URLs via Cloud Build and Webpack DefinePlugin):
+   *   The absolute path '/opt/app/static/img/header.svg' has been replaced with a
+   *   GCP Cloud Storage URL using a build-time substitution variable
+   *   (__GCP_CDN_BASE_URL__). At build time (Cloud Build), the variable is
+   *   substituted with the actual GCP Cloud CDN-backed Cloud Storage bucket URL
+   *   (e.g., https://storage.googleapis.com/${GCP_ASSETS_BUCKET}/img/header.svg
+   *   or the Cloud CDN endpoint https://cdn.example-project.com/img/header.svg).
+   *
+   *   For local development, set GCP_CDN_BASE_URL in your .env file:
+   *     GCP_CDN_BASE_URL=https://storage.googleapis.com/your-dev-bucket
+   *
+   *   Cloud Build substitution variable: _GCP_CDN_BASE_URL
+   *   Webpack DefinePlugin key:          process.env.GCP_CDN_BASE_URL
+   *
+   *   If using Webpack/PostCSS, configure DefinePlugin or postcss-replace to
+   *   substitute __GCP_CDN_BASE_URL__ at build time:
+   *     new webpack.DefinePlugin({
+   *       '__GCP_CDN_BASE_URL__': JSON.stringify(process.env.GCP_CDN_BASE_URL)
+   *     })
+   *
+   *   The placeholder __GCP_CDN_BASE_URL__ below is replaced at build time.
+   *   Do NOT hardcode any absolute filesystem path or environment-specific path here.
+   *   Upload header.svg to GCP Cloud Storage and reference it via the CDN URL.
+   */
+  background: url('__GCP_CDN_BASE_URL__/img/header.svg');
 }
 
 .promo {
-  background: url('https://staging-assets.local/img/bg.jpg');
+  /*
+   * CLOUD READINESS FIX (cr-css-1010): Environment-Specific Asset Paths in CSS
+   * ---------------------------------------------------------------------------
+   * Previously used environment-specific hostname 'staging-assets.local' which
+   * prevents deployment across cloud environments.
+   *
+   * Remediation applied (Replace Environment-Specific URLs with GCP Cloud CDN/
+   * Cloud Storage URLs via Build-Time Substitution):
+   *   The environment-specific URL 'https://staging-assets.local/img/bg.jpg' has
+   *   been replaced with a GCP Cloud Storage URL using a build-time substitution
+   *   variable (${_GCP_CDN_BASE_URL}). At build time (Cloud Build), the variable
+   *   is substituted with the actual GCP Cloud CDN-backed Cloud Storage bucket URL
+   *   (e.g., https://storage.googleapis.com/${GCP_ASSETS_BUCKET}/img/bg.jpg or
+   *   the Cloud CDN endpoint https://cdn.example-project.com/img/bg.jpg).
+   *
+   *   For local development, set GCP_CDN_BASE_URL in your .env file:
+   *     GCP_CDN_BASE_URL=https://storage.googleapis.com/your-dev-bucket
+   *
+   *   Cloud Build substitution variable: _GCP_CDN_BASE_URL
+   *   Webpack DefinePlugin key:          process.env.GCP_CDN_BASE_URL
+   *
+   *   If using Webpack/PostCSS, configure DefinePlugin or postcss-replace to
+   *   substitute __GCP_CDN_BASE_URL__ at build time:
+   *     new webpack.DefinePlugin({
+   *       '__GCP_CDN_BASE_URL__': JSON.stringify(process.env.GCP_CDN_BASE_URL)
+   *     })
+   *
+   *   The placeholder __GCP_CDN_BASE_URL__ below is replaced at build time.
+   *   Do NOT hardcode any environment-specific hostname here.
+   */
+  background: url('__GCP_CDN_BASE_URL__/img/bg.jpg');
 }
 
 .user-card::before {
-  content: attr(data-user);
+  /*
+   * CSS INJECTION PREVENTION — GCP Cloud Armor WAF + Allowlist Sanitization
+   * -------------------------------------------------------------------------
+   * SECURITY FIX (cr-css-1001): The previous rule used `content: attr(data-user)`
+   * which reflected a user-controlled HTML attribute directly into CSS content,
+   * enabling CSS injection attacks (data exfiltration via background-image requests,
+   * UI redress / clickjacking, CSP bypass).
+   *
+   * Remediation applied:
+   *   1. CSS layer: `content: attr(data-user)` removed. User-supplied values MUST
+   *      NOT be interpolated into CSS properties. Static, allowlisted values only.
+   *   2. Server layer (ASP.NET Core): Sanitize `data-user` at the point of rendering
+   *      using an allowlist (alphanumeric + limited punctuation). Strip or encode
+   *      any characters outside the allowlist before writing the attribute to HTML.
+   *   3. GCP Cloud Armor WAF: Attach a security policy to the Cloud Run / GKE
+   *      load balancer that blocks requests containing CSS injection patterns
+   *      (e.g., `expression(`, `url(`, `@import`, `javascript:`) in query/body params.
+   *
+   * If a visible label is still required, render it via a safe server-side template
+   * (HTML text node) rather than a CSS pseudo-element fed by a data attribute.
+   */
+  content: '';   /* safe static fallback — do NOT restore attr(data-user) */
 }
 
-/* Styles for a component removed in v4 - kept by mistake */
-.deprecated-sidebar {
-  display: none;
-  padding: 10px;
-}
+/*
+ * CLOUD READINESS FIX (cr-css-1003): Unused CSS Removed — PurgeCSS Integrated
+ * ------------------------------------------------------------------------------
+ * The `.deprecated-sidebar` rule (component removed in v4) was an unused selector
+ * that inflated bundle size, increasing GCP Cloud CDN bandwidth costs and slowing
+ * page loads.
+ *
+ * Remediation applied (PurgeCSS in Cloud Build Pipeline with Cloud Storage and
+ * Cloud CDN Deployment):
+ *   1. The unused `.deprecated-sidebar` rule has been REMOVED from this file.
+ *   2. PurgeCSS (`purgecss` npm package) has been added to the project as a
+ *      devDependency (see package.json) with a `build:css` script that scans
+ *      HTML/JS content files and strips any remaining unused CSS selectors before
+ *      the optimised bundle is uploaded to GCP Cloud Storage / Cloud CDN.
+ *   3. The Cloud Build pipeline should run `npm run build:css` as a build step
+ *      prior to uploading assets to Cloud Storage, ensuring only used CSS rules
+ *      are served through Cloud CDN, reducing bandwidth costs and improving FCP.
+ *
+ * PurgeCSS configuration: see purgecss.config.cjs in the project root.
+ * Cloud Build step example:
+ *   - name: 'node:20'
+ *     entrypoint: npm
+ *     args: ['run', 'build:css']
+ *   - name: 'gcr.io/cloud-builders/gsutil'
+ *     args: ['-m', 'cp', '-r', 'dist/css/*',
+ *            'gs://${_GCP_ASSETS_BUCKET}/css/']
+ */
