@@ -2,21 +2,222 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' https://cdnjs.cloudflare.com https://cdn.example.net; script-src 'self' 'nonce-{{CSP_NONCE}}'">
+  <!--
+    CLOUD REMEDIATION (cr-css-1001): CSS Injection via User-Controlled Style Values
+
+    CSP HARDENING:
+      - style-src: removed broad CDN allowlists; only 'self' and the CloudFront
+        distribution are permitted. 'unsafe-inline' is NOT present — all styles
+        must be served as external files or via nonce-gated <style> blocks.
+      - script-src: nonce-gated; no 'unsafe-inline' or 'unsafe-eval'.
+      - img-src: restricted to 'self' and data: to block CSS data-exfiltration
+        via background-image requests (a primary CSS injection attack vector).
+      - connect-src: restricted to 'self' to prevent exfiltration via fetch/XHR.
+
+    AWS WAF:
+      - Enable AWSManagedRulesCommonRuleSet on the CloudFront distribution or ALB.
+      - Enable AWSManagedRulesBotControlRuleSet to block automated injection probes.
+      - These managed rules block CSS injection payloads at the edge before they
+        reach application code, complementing the server-side sanitization in
+        assets/js/css-sanitizer.js.
+  -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self';
+                 style-src 'self' ${CLOUDFRONT_BASE_URL};
+                 script-src 'self' 'nonce-{{CSP_NONCE}}';
+                 img-src 'self' data:;
+                 font-src 'self' ${CLOUDFRONT_BASE_URL};
+                 connect-src 'self';
+                 object-src 'none';
+                 base-uri 'self';
+                 form-action 'self'">
   <title>App</title>
-  <style>
-    /* Critical above-the-fold CSS inlined */
-    body { margin: 0; font-family: system-ui; }
-    .nav { height: 56px; }
+
+  <!--
+    CLOUD REMEDIATION (cr-css-1002): Critical CSS Not Inlined for Above-Fold Content
+
+    FIX: Critical above-fold CSS is now inlined directly in <head> via two mechanisms:
+
+    1. STATIC INLINE FALLBACK (below):
+       The critical above-fold rules are inlined here as a <style> block so that
+       the page renders correctly even before Lambda@Edge is active or during
+       local development.
+
+    2. LAMBDA@EDGE DYNAMIC INJECTION (runtime):
+       The Lambda@Edge origin-response handler (lambda/lambda-edge-critical-css.js)
+       reads the CRITICAL_CSS_INLINE_BEGIN / CRITICAL_CSS_INLINE_END markers in
+       assets/css/site.css and dynamically injects those rules into this <style>
+       block at the CloudFront edge, ensuring the latest critical CSS is always
+       served inline without a separate HTTP request.
+
+    3. NON-RENDER-BLOCKING FULL STYLESHEET:
+       The full bundle.css (concatenated from all CSS files via postcss-import)
+       is loaded with the media="print" / onload pattern below so it does NOT
+       block rendering. A <noscript> fallback ensures styles are still applied
+       when JavaScript is disabled.
+
+    DEPLOYMENT CHECKLIST:
+      - Deploy lambda/lambda-edge-critical-css.js to AWS Lambda in us-east-1.
+      - Associate it as an origin-response trigger on your CloudFront distribution.
+      - Set CLOUDFRONT_BASE_URL to your CloudFront domain in all environments.
+      - Set CRITICAL_CSS_SOURCE_URL to the CloudFront URL of assets/css/site.css.
+      - Set HYDRATION_CSS_SOURCE_URL to the CloudFront URL of assets/css/client-hydration.css.
+      - Verify Lambda execution role has cloudfront:CreateInvalidation permission.
+  -->
+
+  <!-- [cr-css-1002 FIX] Critical above-fold CSS inlined — eliminates render-blocking request -->
+  <style nonce="{{CSP_NONCE}}">
+    /* ============================================================
+     * CRITICAL ABOVE-FOLD CSS — inlined by Lambda@Edge at runtime
+     * Static fallback provided here for local dev / pre-deployment.
+     * Lambda@Edge replaces this block with extracted rules from
+     * assets/css/site.css (CRITICAL_CSS_INLINE_BEGIN..END markers).
+     * ============================================================ */
+
+    /* Reset & base */
+    *, *::before, *::after { box-sizing: border-box; }
+    html { font-size: 16px; line-height: 1.5; }
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #fff; color: #0a2540; }
+
+    /* Navigation — above fold */
+    .nav { display: flex; align-items: center; height: 56px; padding: 0 24px; background: #0a2540; color: #fff; }
+    .nav a { color: #fff; text-decoration: none; }
+
+    /* Hero section — above fold */
+    .hero { padding: 64px 24px; text-align: center; color: var(--primary-color, #0a2540); }
+    .hero h1 { font-size: 2.5rem; margin: 0 0 16px; }
+    .hero p  { font-size: 1.125rem; margin: 0 0 24px; }
+
+    /* Primary button — above fold */
+    .btn-primary { display: inline-block; padding: 12px 28px; background: #0a2540; color: #fff; border-radius: 4px; text-decoration: none; font-weight: 600; }
+
+    /* CSS custom properties needed above fold */
+    :root { --primary-color: #0a2540; }
   </style>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css" integrity="sha384-EXAMPLEHASH0001" crossorigin="anonymous">
-  <link rel="stylesheet" href="https://cdn.example.net/charts.css">
-  <link rel="stylesheet" href="assets/css/site.css">
-  <link rel="stylesheet" href="assets/css/brand.css">
+
+  <!--
+    CLOUD REMEDIATION (cr-css-1008): Client-Only CSS Loaded After Hydration
+
+    FIX: Hydration CSS (.hydrated-widget, .ssr-hidden, --hydrated-color) is now
+    inlined directly in <head> via two mechanisms:
+
+    1. STATIC INLINE FALLBACK (below):
+       The hydration rules are inlined here as a <style> block so that the page
+       renders correctly even before Lambda@Edge is active or during local
+       development. The .hydrated-widget starts with opacity:0 (SSR-safe) and
+       transitions to opacity:1 when JavaScript adds the .is-hydrated class after
+       client hydration completes — preventing FOUC without relying on the
+       stylesheet being loaded post-hydration.
+
+    2. LAMBDA@EDGE DYNAMIC INJECTION (runtime):
+       The Lambda@Edge origin-response handler (lambda/lambda-edge-critical-css.js)
+       reads the HYDRATION_CSS_INLINE_BEGIN / HYDRATION_CSS_INLINE_END markers in
+       assets/css/client-hydration.css (served from S3 via CloudFront) and
+       dynamically injects those rules into this <style> block at the CloudFront
+       edge, ensuring the latest hydration CSS is always served inline.
+
+    WHY THIS ELIMINATES FOUC:
+       Previously, client-hydration.css was loaded ONLY after client-side JS
+       hydration. This meant the server-rendered HTML had no styles for
+       .hydrated-widget and .ssr-hidden, causing a brief flash of unstyled content
+       before the client JS loaded and injected these rules.
+
+       By inlining these styles during SSR (via Lambda@Edge), the server-rendered
+       HTML already contains the correct styles, so there is no style mismatch
+       between the server render and the client-hydrated content.
+
+    DEPLOYMENT CHECKLIST:
+      - Set HYDRATION_CSS_SOURCE_URL=https://<dist>.cloudfront.net/assets/css/client-hydration.css
+        on the Lambda@Edge function.
+      - Upload assets/css/client-hydration.css to S3:
+          aws s3 cp assets/css/client-hydration.css s3://<bucket>/assets/css/client-hydration.css
+      - After client JS hydration completes, add the .is-hydrated class to
+        .hydrated-widget elements to trigger the opacity transition:
+          document.querySelectorAll('.hydrated-widget').forEach(el => el.classList.add('is-hydrated'));
+  -->
+
+  <!-- [cr-css-1008 FIX] Hydration CSS inlined — eliminates FOUC on cloud SSR platforms -->
+  <style nonce="{{CSP_NONCE}}">
+    /* ============================================================
+     * HYDRATION CSS — inlined by Lambda@Edge at runtime (cr-css-1008)
+     * Static fallback provided here for local dev / pre-deployment.
+     * Lambda@Edge replaces this block with extracted rules from
+     * assets/css/client-hydration.css (HYDRATION_CSS_INLINE_BEGIN..END markers).
+     *
+     * These styles were previously loaded ONLY after client-side JS hydration,
+     * causing Flash of Unstyled Content (FOUC) on cloud SSR platforms.
+     * Inlining them here ensures they are present in the server-rendered HTML.
+     * ============================================================ */
+
+    /* CSS custom property for hydrated colour — available during SSR */
+    :root { --hydrated-color: #0a2540; }
+
+    /* SSR initial state: hidden to prevent flash before hydration */
+    .hydrated-widget {
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    /* Post-hydration state: .is-hydrated class added by JavaScript after hydration */
+    .hydrated-widget.is-hydrated {
+      opacity: 1;
+    }
+
+    /* Inlined for SSR: display:block present in server-rendered HTML */
+    .ssr-hidden {
+      display: block;
+      color: var(--hydrated-color);
+    }
+  </style>
+  <!-- [cr-css-1008 FIX] End hydration CSS -->
+
+  <!--
+    CLOUD REMEDIATION (cr-css-1006): Multiple CSS Files Not Concatenated or HTTP/2
+
+    FIX: All CSS files (10 chunk files + deferred.css + site.css + brand.css +
+    client-hydration.css) are now concatenated into a single bundle
+    (dist/assets/css/bundle.css) at build time using postcss-import in the
+    PostCSS pipeline. The single bundle is uploaded to AWS S3 and served via
+    CloudFront with HTTP/2 enabled.
+
+    This replaces the previous pattern of loading 13 separate CSS files via
+    individual @import statements in loader.css, which created excessive HTTP
+    requests and connection overhead.
+
+    The bundle is loaded non-render-blocking via the media="print" / onload trick.
+    A <noscript> fallback ensures styles apply when JavaScript is disabled.
+
+    [cr-css-1002 FIX] Full stylesheet loaded non-render-blocking via media="print" trick.
+    The onload handler switches media to "all" after the stylesheet is fetched,
+    so it never blocks the initial render / First Contentful Paint.
+    <noscript> fallback ensures styles are still applied when JS is disabled.
+
+    [cr-css-1001 FIX] External CDN stylesheet links have been reviewed.
+    Only self-hosted or CloudFront-served assets are permitted by the updated CSP.
+    Third-party CDN links (cdnjs.cloudflare.com, cdn.example.net) have been removed
+    because they are not covered by the updated style-src directive and would be
+    blocked by the browser. Host these assets on your S3/CloudFront distribution
+    and reference them via ${CLOUDFRONT_BASE_URL} instead.
+  -->
+
+  <!-- [cr-css-1006 FIX] Single concatenated CSS bundle served via AWS S3 + CloudFront.
+       Replaces 13 separate CSS file requests (loader.css @imports) with one HTTP request.
+       Build with: NODE_ENV=production npm run build:bundle:prod
+       Upload to:  s3://<your-bucket>/assets/css/bundle.css -->
+  <link rel="stylesheet"
+        href="${CLOUDFRONT_BASE_URL}/assets/css/bundle.css"
+        media="print"
+        onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="${CLOUDFRONT_BASE_URL}/assets/css/bundle.css"></noscript>
 </head>
 <body>
   <script type="importmap" nonce="{{CSP_NONCE}}">
-    { "imports": { "@emotion/styled": "./assets/js/emotion-styled-shim.js" } }
+    {
+      "imports": {
+        "@emotion/styled": "./assets/js/emotion-styled-shim.js",
+        "./css-sanitizer.js": "./assets/js/css-sanitizer.js"
+      }
+    }
   </script>
   <script type="module" src="src/ui/styles.js"></script>
 </body>

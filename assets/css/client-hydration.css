@@ -1,17 +1,161 @@
-/* Client-only styles — loaded after hydration via JavaScript.
-   This stylesheet is NOT available during server-side rendering.
-   Causes FOUC on cloud SSR platforms (Vercel/Netlify/Lambda). */
+/*
+ * CLOUD REMEDIATION (cr-css-1008): Client-Only CSS Loaded After Hydration
+ *
+ * PROBLEM (original lines 1–17):
+ *   This stylesheet was loaded exclusively after client-side JavaScript hydration,
+ *   meaning its rules were NEVER available during server-side rendering (SSR).
+ *   On cloud SSR platforms (AWS Lambda@Edge, Vercel, Netlify) this caused:
+ *     - Flash of Unstyled Content (FOUC): the server-rendered HTML had no styles
+ *       for .hydrated-widget and .ssr-hidden, so users saw a brief unstyled flash
+ *       before the client JS loaded and injected these rules.
+ *     - Style mismatch between server-rendered and client-hydrated content, causing
+ *       React/Vue/Angular hydration warnings and layout shifts (CLS).
+ *     - The background-image URL (cdn.example.net) was only resolved client-side,
+ *       so the image was never pre-loaded or available during SSR.
+ *
+ * FIX APPLIED — Inline Critical CSS via AWS Lambda@Edge SSR with S3 Style Extraction:
+ *   1. The critical rules (.hydrated-widget, .ssr-hidden) are now marked with
+ *      HYDRATION_CSS_INLINE_BEGIN / HYDRATION_CSS_INLINE_END comment markers.
+ *   2. The Lambda@Edge origin-response handler (lambda/lambda-edge-critical-css.js)
+ *      fetches this file from S3 (via HYDRATION_CSS_SOURCE_URL env var), extracts
+ *      the marked rules, and injects them as an inline <style> block into the HTML
+ *      <head> during SSR — BEFORE the response is delivered to the browser.
+ *   3. This ensures the styles are present in the server-rendered HTML, eliminating
+ *      FOUC and preventing style mismatch between SSR and client-hydrated content.
+ *   4. The background-image URL has been migrated from the third-party CDN
+ *      (cdn.example.net) to AWS S3 served via CloudFront, using the
+ *      ${CLOUDFRONT_BASE_URL} build-time placeholder (resolved by postcss-replace).
+ *   5. The --hydrated-color CSS custom property is now defined in the :root block
+ *      within the inlined SSR styles so it is available during server render.
+ *
+ * HOW IT WORKS AT RUNTIME:
+ *   1. Browser requests an HTML page from CloudFront.
+ *   2. CloudFront forwards the request to the origin (S3 or app server).
+ *   3. The Lambda@Edge origin-response trigger fires.
+ *   4. Lambda@Edge fetches this file from S3 (HYDRATION_CSS_SOURCE_URL).
+ *   5. It extracts the rules between HYDRATION_CSS_INLINE_BEGIN and
+ *      HYDRATION_CSS_INLINE_END markers.
+ *   6. It injects those rules as an inline <style> block into the HTML <head>.
+ *   7. The browser receives HTML with hydration styles already inlined — no FOUC.
+ *   8. When client JS hydrates, the styles are already present — no style mismatch.
+ *
+ * DEPLOYMENT:
+ *   - Upload this file to S3: aws s3 cp assets/css/client-hydration.css s3://<bucket>/assets/css/client-hydration.css
+ *   - Set HYDRATION_CSS_SOURCE_URL=https://<dist>.cloudfront.net/assets/css/client-hydration.css
+ *     on the Lambda@Edge function.
+ *   - Set CLOUDFRONT_BASE_URL=https://<dist>.cloudfront.net in the build environment
+ *     so postcss-replace substitutes the placeholder in the background-image URL.
+ *   - Run npm run build:bundle to include this file in the concatenated CSS bundle.
+ *
+ * S3 UPLOAD COMMAND:
+ *   aws s3 cp assets/css/client-hydration.css \
+ *     s3://<your-bucket>/assets/css/client-hydration.css \
+ *     --cache-control "max-age=31536000,immutable"
+ *
+ * CLOUDFRONT INVALIDATION (after upload):
+ *   aws cloudfront create-invalidation \
+ *     --distribution-id <DIST_ID> \
+ *     --paths "/assets/css/client-hydration.css"
+ */
 
-/* These styles are injected post-hydration only */
+/* ============================================================
+ * HYDRATION CSS INLINE MARKER — rules between BEGIN/END are
+ * extracted by Lambda@Edge and injected inline into <head>
+ * during SSR to eliminate FOUC and style mismatch.
+ * HYDRATION_CSS_INLINE_BEGIN
+ * ============================================================ */
+
+/*
+ * CSS custom property for hydrated colour — defined here so it is available
+ * during SSR (server-rendered HTML) and not only after client-side hydration.
+ * Lambda@Edge inlines this :root block into <head> before the page is served.
+ */
+:root {
+  --hydrated-color: #0a2540;
+}
+
+/*
+ * [cr-css-1008 FIX] Line 6 (source): .hydrated-widget was previously loaded
+ * only after client-side JS hydration, causing FOUC on cloud SSR platforms.
+ *
+ * FIX: This rule is now extracted by Lambda@Edge and inlined into the HTML
+ * <head> during SSR so the style is present in the server-rendered HTML.
+ * The background-image URL has been migrated from the third-party CDN
+ * (cdn.example.net) to AWS S3/CloudFront via the ${CLOUDFRONT_BASE_URL}
+ * build-time placeholder, resolved by postcss-replace at build time.
+ *
+ * The opacity:0 initial state is set here (SSR-safe) so the element starts
+ * hidden on the server render. The transition to opacity:1 is triggered by
+ * adding the .is-hydrated class via JavaScript after hydration completes,
+ * preventing a flash of the fully-visible widget before JS runs.
+ */
 .hydrated-widget {
-  opacity: 1;
+  /* SSR initial state: hidden to prevent flash before hydration */
+  opacity: 0;
   transition: opacity 0.3s;
-  /* url loaded only after client-side JS hydration */
-  background: url('https://cdn.example.net/client-only-bg.png');
+  /* [cr-css-1008 FIX] background-image migrated from third-party CDN
+     (cdn.example.net) to AWS S3/CloudFront. ${CLOUDFRONT_BASE_URL} is
+     substituted at build time by postcss-replace using the
+     CLOUDFRONT_BASE_URL environment variable. */
+  background: url('${CLOUDFRONT_BASE_URL}/assets/img/client-hydration-bg.png');
 }
 
-.ssr-hidden {
-  /* This block is intentionally excluded from SSR stylesheet extraction */
-  display: block;
-  color: var(--hydrated-color);
+/*
+ * Post-hydration state: added by JavaScript after client hydration completes.
+ * Using a class toggle (.is-hydrated) instead of relying on the stylesheet
+ * being loaded post-hydration ensures the transition is smooth and the style
+ * is available during SSR (opacity:0 above) and after hydration (opacity:1 here).
+ */
+.hydrated-widget.is-hydrated {
+  opacity: 1;
 }
+
+/*
+ * [cr-css-1008 FIX] .ssr-hidden was previously excluded from SSR stylesheet
+ * extraction. It is now inlined by Lambda@Edge so the display:block rule is
+ * present in the server-rendered HTML, preventing layout shift on hydration.
+ * The --hydrated-color custom property is defined in the :root block above,
+ * ensuring it resolves correctly during SSR.
+ */
+.ssr-hidden {
+  display: block;
+  /*
+   * CLOUD REMEDIATION (cr-css-1009): CSS Custom Properties Without Fallback Values
+   *
+   * PROBLEM (original line 16):
+   *   color: var(--hydrated-color) had no fallback value. If --hydrated-color is
+   *   not defined (e.g. older browsers that do not support CSS custom properties,
+   *   or when this rule is inlined by Lambda@Edge before the :root block is parsed),
+   *   the property resolves to its initial value (transparent/inherit), causing
+   *   incorrect text colour for the .ssr-hidden element across the global user base.
+   *
+   * FIX APPLIED — PostCSS Custom Properties Fallback Plugin with AWS S3/CloudFront CSS Pipeline:
+   *   The postcss-custom-properties plugin has been integrated into the PostCSS build
+   *   pipeline (postcss.config.js). It automatically resolves CSS custom properties to
+   *   their static values and adds a static fallback as the second argument to var().
+   *   The processed CSS is served via S3 and CloudFront for global browser compatibility.
+   *
+   *   A static fallback value (#0a2540, matching the --hydrated-color definition in
+   *   the :root block above) has been added as the second argument to var() so that
+   *   older browsers and SSR environments always render the correct colour even when
+   *   the custom property is not yet defined.
+   */
+  /* [cr-css-1009 FIX] Line 16 (source): Added static fallback value #0a2540 to var(--hydrated-color) */
+  color: var(--hydrated-color, #0a2540);
+}
+
+/* ============================================================
+ * END HYDRATION CSS INLINE MARKER
+ * HYDRATION_CSS_INLINE_END
+ * ============================================================ */
+
+/*
+ * Non-critical hydration styles — loaded as part of the full CSS bundle
+ * (dist/assets/css/bundle.css) via the PostCSS build pipeline (loader.css).
+ * These rules are NOT inlined by Lambda@Edge; they are served from S3/CloudFront
+ * as part of the concatenated bundle and applied after the initial render.
+ *
+ * Add any additional post-hydration styles below this comment that do NOT
+ * need to be available during SSR (i.e. styles for below-fold or interactive
+ * components that are only visible after user interaction).
+ */

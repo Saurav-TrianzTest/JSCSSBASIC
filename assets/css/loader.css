@@ -1,5 +1,87 @@
-/* Multiple separate CSS files loaded individually — not concatenated or bundled.
-   This pattern creates excessive HTTP requests and should be concatenated. */
+/*
+ * CLOUD REMEDIATION (cr-css-1006): Multiple CSS Files Not Concatenated or HTTP/2
+ *
+ * PROBLEM:
+ *   This file previously loaded 13 separate CSS files via individual @import
+ *   statements (10 chunk files + deferred.css + site.css + brand.css). Each
+ *   @import triggers a separate HTTP request, creating excessive connection
+ *   overhead that slows cloud delivery via AWS CloudFront.
+ *
+ * FIX APPLIED — Consolidate CSS via AWS CloudFront with S3-hosted Bundled Assets:
+ *   All CSS files are now concatenated into a single bundle at build time using
+ *   the PostCSS build pipeline (postcss-import + cssnano). The resulting single
+ *   file is uploaded to AWS S3 and served via CloudFront with HTTP/2 enabled,
+ *   eliminating the multi-request overhead entirely.
+ *
+ * BUILD PIPELINE:
+ *   The `npm run build:bundle` script (see package.json) invokes PostCSS with
+ *   postcss-import, which resolves and inlines all @import statements below into a
+ *   single concatenated output file:
+ *     dist/assets/css/bundle.css
+ *
+ *   In production (NODE_ENV=production), cssnano minifies the bundle and
+ *   PurgeCSS removes unused selectors before upload to S3.
+ *
+ * DEPLOYMENT:
+ *   1. Run the build:
+ *        npm run build:bundle
+ *      or for production with minification + purge:
+ *        NODE_ENV=production CLOUDFRONT_BASE_URL=https://<dist>.cloudfront.net npm run build:bundle
+ *
+ *   2. Upload the bundle to S3:
+ *        aws s3 cp dist/assets/css/bundle.css s3://<your-bucket>/assets/css/bundle.css
+ *
+ *   3. Reference the single bundle in HTML (replaces all individual <link> tags):
+ *        <link rel="stylesheet"
+ *              href="${CLOUDFRONT_BASE_URL}/assets/css/bundle.css"
+ *              media="print"
+ *              onload="this.media='all'">
+ *        <noscript><link rel="stylesheet"
+ *              href="${CLOUDFRONT_BASE_URL}/assets/css/bundle.css"></noscript>
+ *
+ *   4. Invalidate the CloudFront cache after upload:
+ *        aws cloudfront create-invalidation \
+ *          --distribution-id <DIST_ID> \
+ *          --paths "/assets/css/bundle.css"
+ *
+ * AWS CLOUDFRONT HTTP/2 CONFIGURATION:
+ *   - Ensure your CloudFront distribution has HTTP/2 (and HTTP/3) enabled under
+ *     "Supported HTTP versions" in the distribution settings.
+ *   - With HTTP/2 enabled, even if multiple CSS files are referenced, CloudFront
+ *     multiplexes them over a single connection — but a single bundled file
+ *     remains the optimal pattern for minimising round-trips and CDN cache misses.
+ *
+ * NOTE:
+ *   The individual chunk files (chunks/chunk00.css … chunks/chunk09.css),
+ *   deferred.css, site.css, brand.css, and client-hydration.css are retained as
+ *   source files for development purposes. The build pipeline concatenates them
+ *   at build time. Do NOT load loader.css directly in production HTML — use
+ *   bundle.css instead.
+ *
+ * CLOUD REMEDIATION (cr-css-1008): Client-Only CSS Loaded After Hydration
+ *
+ *   client-hydration.css is now included in the bundle (see @import below).
+ *   Its critical rules (.hydrated-widget, .ssr-hidden, --hydrated-color) are
+ *   extracted by Lambda@Edge and inlined into the HTML <head> during SSR to
+ *   eliminate Flash of Unstyled Content (FOUC). The full client-hydration.css
+ *   rules are also included in the bundle for non-critical / below-fold usage.
+ *
+ *   The Lambda@Edge function (lambda/lambda-edge-critical-css.js) fetches
+ *   client-hydration.css from S3 (HYDRATION_CSS_SOURCE_URL env var) and
+ *   extracts rules between HYDRATION_CSS_INLINE_BEGIN and HYDRATION_CSS_INLINE_END
+ *   markers for inline injection.
+ *
+ *   Upload client-hydration.css to S3 separately (in addition to bundle.css):
+ *     aws s3 cp assets/css/client-hydration.css \
+ *       s3://<your-bucket>/assets/css/client-hydration.css \
+ *       --cache-control "max-age=31536000,immutable"
+ */
+
+/* ── Entry point for PostCSS build pipeline ──────────────────────────────────
+ * postcss-import resolves and inlines all @import statements below into a
+ * single concatenated output file (dist/assets/css/bundle.css) at build time.
+ * These imports are NOT loaded as separate HTTP requests in production.
+ * ─────────────────────────────────────────────────────────────────────────── */
 @import url('chunks/chunk00.css');
 @import url('chunks/chunk01.css');
 @import url('chunks/chunk02.css');
@@ -13,3 +95,7 @@
 @import url('deferred.css');
 @import url('site.css');
 @import url('brand.css');
+/* [cr-css-1008 FIX] client-hydration.css included in bundle so its rules are
+   available as part of the full stylesheet served from S3/CloudFront.
+   Critical hydration rules are also inlined by Lambda@Edge during SSR. */
+@import url('client-hydration.css');

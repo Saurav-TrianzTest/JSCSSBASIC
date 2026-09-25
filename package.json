@@ -1,5 +1,23 @@
 {
   "name": "analytics-portal",
   "type": "module",
-  "dependencies": { "@emotion/styled": "^11.11.0" }
+  "dependencies": {
+    "@emotion/styled": "^11.11.0"
+  },
+  "devDependencies": {
+    "postcss": "^8.4.38",
+    "postcss-cli": "^11.0.0",
+    "postcss-replace": "^2.0.1",
+    "postcss-import": "^16.1.0",
+    "cssnano": "^7.0.0",
+    "@fullhuman/postcss-purgecss": "^6.0.0"
+  },
+  "scripts": {
+    "build:css": "postcss assets/css/site.css --output dist/assets/css/site.css",
+    "build:css:purge": "NODE_ENV=production postcss assets/css/site.css --output dist/assets/css/site.css",
+    "build:bundle": "postcss assets/css/loader.css --output dist/assets/css/bundle.css",
+    "build:bundle:prod": "NODE_ENV=production postcss assets/css/loader.css --output dist/assets/css/bundle.css",
+    "build:hydration:css": "postcss assets/css/client-hydration.css --output dist/assets/css/client-hydration.css",
+    "build:hydration:css:prod": "NODE_ENV=production postcss assets/css/client-hydration.css --output dist/assets/css/client-hydration.css"
+  }
 }
